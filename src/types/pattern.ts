@@ -1,0 +1,50 @@
+export type PatternType = 'circle' | 'rectangle' | 'custom'
+
+export interface Point {
+  x: number
+  y: number
+}
+
+export interface PatternTemplate {
+  id: string
+  name: string
+  type: PatternType
+  radius?: number
+  width?: number
+  height?: number
+  points?: Point[]
+  fill: string
+  stroke: string
+  strokeWidth: number
+}
+
+export interface PlacedPattern {
+  id: string
+  templateId: string
+  x: number
+  y: number
+  rotation: number
+  scaleX: number
+  scaleY: number
+}
+
+export interface SilverSheet {
+  width: number
+  height: number
+}
+
+export interface LayoutScheme {
+  id: string
+  name: string
+  createdAt: number
+  silverSheet: SilverSheet
+  patterns: PatternTemplate[]
+  placedPatterns: PlacedPattern[]
+}
+
+export interface CanvasState {
+  scale: number
+  offsetX: number
+  offsetY: number
+  selectedPatternId: string | null
+}
