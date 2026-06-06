@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { usePatternStore } from '@/stores/pattern'
-import { useMessage, useDialog } from 'naive-ui'
-import type { PlacedPattern, PatternTemplate } from '@/types/pattern'
+import { useMessage, useDialog, NButton, NIcon, NSelect, NInputNumber, NSpace } from 'naive-ui'
+import type { PlacedPattern, PatternTemplate, AutoArrangeAlgorithm } from '@/types/pattern'
 import { checkPatternOutOfBounds } from '@/utils/patternUtils'
+import { GridOutline, ShuffleOutline } from '@vicons/ionicons5'
 
 const store = usePatternStore()
 const message = useMessage()
@@ -14,7 +15,8 @@ const stageSize = ref({ width: 800, height: 600 })
 const isDraggingStage = ref(false)
 const dragStart = ref({ x: 0, y: 0 })
 const dragStartOffset = ref({ x: 0, y: 0 })
-const mousePos = ref({ x: 0, y: 0 })
+
+const showArrangeOptions = ref(false)
 
 const stageConfig = computed(() => ({
   width: stageSize.value.width,
@@ -34,6 +36,12 @@ const silverSheetConfig = computed(() => ({
   stroke: '#8B7355',
   strokeWidth: 2 / store.canvasScale
 }))
+
+const algorithmOptions = [
+  { label: '网格排列', value: 'grid' },
+  { label: '行排列', value: 'row' },
+  { label: '紧凑排列', value: 'compact' }
+]
 
 function getTemplate(templateId: string): PatternTemplate | undefined {
   return store.patternTemplates.find(t => t.id === templateId)
@@ -153,7 +161,7 @@ function handlePatternDragStart(_e: any, placedId: string) {
 
 function handlePatternDragMove(e: any, placedId: string) {
   const node = e.target
-  store.updatePlacedPattern(placedId, {
+  store.forceUpdatePlacedPattern(placedId, {
     x: node.x(),
     y: node.y()
   })
@@ -299,6 +307,7 @@ function handleKeyDown(e: KeyboardEvent) {
         content: '确定要删除选中的纹样吗？',
         positiveText: '删除',
         negativeText: '取消',
+        type: 'error',
         onPositiveClick: () => {
           if (store.selectedPatternId) {
             store.removePlacedPattern(store.selectedPatternId)
@@ -314,6 +323,9 @@ function handleKeyDown(e: KeyboardEvent) {
         const newPattern = store.duplicatePlacedPattern(store.selectedPatternId)
         if (newPattern) {
           store.selectPattern(newPattern.id)
+          message.success('纹样已复制')
+        } else {
+          message.warning('无法复制，周围没有足够空间')
         }
       }
       break
@@ -323,9 +335,16 @@ function handleKeyDown(e: KeyboardEvent) {
         e.preventDefault()
         const pattern = store.placedPatterns.find(p => p.id === store.selectedPatternId)
         if (pattern) {
-          store.updatePlacedPattern(store.selectedPatternId, {
+          const result = store.updatePlacedPattern(store.selectedPatternId, {
             rotation: pattern.rotation + (e.shiftKey ? -15 : 15)
           })
+          if (!result.valid) {
+            if (result.reason === 'outOfBounds') {
+              message.warning('旋转后超出银片边界，已阻止')
+            } else if (result.reason === 'overlapping') {
+              message.warning('旋转后与其他纹样重叠，已阻止')
+            }
+          }
         }
       }
       break
@@ -336,10 +355,17 @@ function moveSelected(dx: number, dy: number) {
   if (!store.selectedPatternId) return
   const pattern = store.placedPatterns.find(p => p.id === store.selectedPatternId)
   if (pattern) {
-    store.updatePlacedPattern(store.selectedPatternId, {
+    const result = store.updatePlacedPattern(store.selectedPatternId, {
       x: pattern.x + dx,
       y: pattern.y + dy
     })
+    if (!result.valid) {
+      if (result.reason === 'outOfBounds') {
+        message.warning('移动后超出银片边界，已阻止')
+      } else if (result.reason === 'overlapping') {
+        message.warning('移动后与其他纹样重叠，已阻止')
+      }
+    }
   }
 }
 
@@ -379,6 +405,29 @@ function handleStageDblClick(_e: any) {
       message.success('自定义纹样创建成功')
     }
   }
+}
+
+function handleAutoArrange() {
+  if (store.placedPatterns.length === 0) {
+    message.warning('画布上没有纹样，无法自动排列')
+    return
+  }
+  const count = store.runAutoArrange()
+  message.success(`自动排列完成，成功放置 ${count} 个纹样`)
+}
+
+function handleAlgorithmChange(value: AutoArrangeAlgorithm) {
+  store.setAutoArrangeOptions({ algorithm: value })
+}
+
+function handleSpacingChange(value: number | null) {
+  if (value != null) {
+    store.setAutoArrangeOptions({ spacing: value })
+  }
+}
+
+function toggleArrangeOptions() {
+  showArrangeOptions.value = !showArrangeOptions.value
 }
 
 onMounted(() => {
@@ -499,6 +548,47 @@ watch(
           取消
         </button>
       </div>
+    </div>
+
+    <div v-if="!store.isDrawingMode" class="arrange-bar">
+      <div v-if="showArrangeOptions" class="arrange-options">
+        <div class="arrange-option-item">
+          <span class="option-label">排列算法</span>
+          <NSelect
+            :value="store.autoArrangeOptions.algorithm"
+            :options="algorithmOptions"
+            size="small"
+            style="width: 120px"
+            @update:value="handleAlgorithmChange"
+          />
+        </div>
+        <div class="arrange-option-item">
+          <span class="option-label">间距(mm)</span>
+          <NInputNumber
+            :value="store.autoArrangeOptions.spacing"
+            :min="0"
+            :max="50"
+            :step="1"
+            size="small"
+            style="width: 80px"
+            @update:value="handleSpacingChange"
+          />
+        </div>
+      </div>
+      <NSpace size="small">
+        <NButton size="small" type="primary" @click="handleAutoArrange">
+          <template #icon>
+            <NIcon><ShuffleOutline /></NIcon>
+          </template>
+          一键排列
+        </NButton>
+        <NButton size="small" ghost @click="toggleArrangeOptions">
+          <template #icon>
+            <NIcon><GridOutline /></NIcon>
+          </template>
+          排列设置
+        </NButton>
+      </NSpace>
     </div>
 
     <div class="canvas-controls">
@@ -633,5 +723,39 @@ watch(
 .drawing-btn.danger:hover:not(:disabled) {
   color: #e85a3a;
   border-color: #e85a3a;
+}
+
+.arrange-bar {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 10px 14px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 100;
+}
+
+.arrange-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #eee;
+}
+
+.arrange-option-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #666;
+}
+
+.option-label {
+  min-width: 60px;
 }
 </style>

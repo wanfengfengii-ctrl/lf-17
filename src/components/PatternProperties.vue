@@ -9,6 +9,7 @@ import {
   NSpace,
   NIcon,
   NPopconfirm,
+  NAlert,
   useMessage
 } from 'naive-ui'
 import { Duplicate, Trash, Reload } from '@vicons/ionicons5'
@@ -36,12 +37,32 @@ const patternArea = computed(() => {
   )
 })
 
+const hasIssue = computed(() => {
+  if (!store.selectedPatternId) return false
+  return (
+    store.outOfBoundsPatterns.includes(store.selectedPatternId) ||
+    store.overlappingPatternPairs.some(pair => pair.includes(store.selectedPatternId!))
+  )
+})
+
+const issueText = computed(() => {
+  if (!store.selectedPatternId) return ''
+  const isOutOfBounds = store.outOfBoundsPatterns.includes(store.selectedPatternId)
+  const isOverlapping = store.overlappingPatternPairs.some(pair => pair.includes(store.selectedPatternId!))
+  if (isOutOfBounds && isOverlapping) return '纹样越界且与其他纹样重叠'
+  if (isOutOfBounds) return '纹样超出银片边界'
+  if (isOverlapping) return '纹样与其他纹样重叠'
+  return ''
+})
+
 function handleDuplicate() {
   if (!store.selectedPatternId) return
   const newPattern = store.duplicatePlacedPattern(store.selectedPatternId)
   if (newPattern) {
     store.selectPattern(newPattern.id)
     message.success('纹样已复制')
+  } else {
+    message.warning('无法复制，周围没有足够空间')
   }
 }
 
@@ -53,34 +74,76 @@ function handleDelete() {
 
 function handleRotate(deg: number) {
   if (!store.selectedPatternId || !selectedPattern.value) return
-  store.updatePlacedPattern(store.selectedPatternId, {
+  const result = store.updatePlacedPattern(store.selectedPatternId, {
     rotation: selectedPattern.value.rotation + deg
   })
+  if (!result.valid) {
+    if (result.reason === 'outOfBounds') {
+      message.warning('旋转后超出银片边界，已阻止')
+    } else if (result.reason === 'overlapping') {
+      message.warning('旋转后与其他纹样重叠，已阻止')
+    }
+  }
 }
 
 function handleScaleXChange(value: number | null) {
   if (!store.selectedPatternId || value == null) return
-  store.updatePlacedPattern(store.selectedPatternId, { scaleX: value })
+  const result = store.updatePlacedPattern(store.selectedPatternId, { scaleX: value })
+  if (!result.valid) {
+    if (result.reason === 'outOfBounds') {
+      message.warning('缩放后超出银片边界，已阻止')
+    } else if (result.reason === 'overlapping') {
+      message.warning('缩放后与其他纹样重叠，已阻止')
+    }
+  }
 }
 
 function handleScaleYChange(value: number | null) {
   if (!store.selectedPatternId || value == null) return
-  store.updatePlacedPattern(store.selectedPatternId, { scaleY: value })
+  const result = store.updatePlacedPattern(store.selectedPatternId, { scaleY: value })
+  if (!result.valid) {
+    if (result.reason === 'outOfBounds') {
+      message.warning('缩放后超出银片边界，已阻止')
+    } else if (result.reason === 'overlapping') {
+      message.warning('缩放后与其他纹样重叠，已阻止')
+    }
+  }
 }
 
 function handleXChange(value: number | null) {
   if (!store.selectedPatternId || value == null) return
-  store.updatePlacedPattern(store.selectedPatternId, { x: value })
+  const result = store.updatePlacedPattern(store.selectedPatternId, { x: value })
+  if (!result.valid) {
+    if (result.reason === 'outOfBounds') {
+      message.warning('移动后超出银片边界，已阻止')
+    } else if (result.reason === 'overlapping') {
+      message.warning('移动后与其他纹样重叠，已阻止')
+    }
+  }
 }
 
 function handleYChange(value: number | null) {
   if (!store.selectedPatternId || value == null) return
-  store.updatePlacedPattern(store.selectedPatternId, { y: value })
+  const result = store.updatePlacedPattern(store.selectedPatternId, { y: value })
+  if (!result.valid) {
+    if (result.reason === 'outOfBounds') {
+      message.warning('移动后超出银片边界，已阻止')
+    } else if (result.reason === 'overlapping') {
+      message.warning('移动后与其他纹样重叠，已阻止')
+    }
+  }
 }
 
 function handleRotationChange(value: number | null) {
   if (!store.selectedPatternId || value == null) return
-  store.updatePlacedPattern(store.selectedPatternId, { rotation: value })
+  const result = store.updatePlacedPattern(store.selectedPatternId, { rotation: value })
+  if (!result.valid) {
+    if (result.reason === 'outOfBounds') {
+      message.warning('旋转后超出银片边界，已阻止')
+    } else if (result.reason === 'overlapping') {
+      message.warning('旋转后与其他纹样重叠，已阻止')
+    }
+  }
 }
 </script>
 
@@ -98,6 +161,12 @@ function handleRotationChange(value: number | null) {
         :style="{ backgroundColor: selectedTemplate.fill }"
       ></div>
       <span class="pattern-name">{{ selectedTemplate.name }}</span>
+    </div>
+
+    <div v-if="hasIssue" style="margin-bottom: 12px;">
+      <NAlert type="warning" :show-icon="true" size="small">
+        {{ issueText }}
+      </NAlert>
     </div>
 
     <NForm label-placement="left" label-width="70px" size="small" class="property-form">
@@ -179,6 +248,7 @@ function handleRotationChange(value: number | null) {
       <NPopconfirm
         positive-text="删除"
         negative-text="取消"
+        type="error"
         @positive-click="handleDelete"
       >
         <template #trigger>

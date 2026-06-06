@@ -6,7 +6,9 @@ import type {
   SilverSheet,
   LayoutScheme,
   PatternType,
-  Point
+  Point,
+  AutoArrangeOptions,
+  CanvasViewState
 } from '@/types/pattern'
 import {
   generateId,
@@ -14,7 +16,10 @@ import {
   checkPatternOutOfBounds,
   checkPatternsOverlap,
   calculateTotalUsedArea,
-  getDefaultPatternColors
+  getDefaultPatternColors,
+  autoArrangePatterns,
+  parseSvgToPoints,
+  compareSchemesUtilization
 } from '@/utils/patternUtils'
 
 const STORAGE_KEY = 'silver-pattern-layout-schemes'
@@ -40,6 +45,7 @@ export const usePatternStore = defineStore('pattern', () => {
   const canvasOffsetY = ref(0)
 
   const dragSnapshot = ref<PlacedPattern | null>(null)
+  const propertySnapshot = ref<PlacedPattern | null>(null)
 
   const isDrawingMode = ref(false)
   const drawingPoints = ref<Point[]>([])
@@ -47,6 +53,14 @@ export const usePatternStore = defineStore('pattern', () => {
   const drawingFill = ref('#CD853F')
   const drawingStroke = ref('#8B4513')
   const drawingStrokeWidth = ref(2)
+
+  const autoArrangeOptions = ref<AutoArrangeOptions>({
+    algorithm: 'grid',
+    spacing: 5,
+    allowRotation: false
+  })
+
+  const isAutoArranging = ref(false)
 
   const sheetArea = computed(() => silverSheet.value.width * silverSheet.value.height)
 
@@ -88,6 +102,10 @@ export const usePatternStore = defineStore('pattern', () => {
     return outOfBoundsPatterns.value.length > 0 || overlappingPatternPairs.value.length > 0
   })
 
+  const schemeComparisonList = computed(() => {
+    return compareSchemesUtilization(schemes.value)
+  })
+
   function getPatternCount(templateId: string): number {
     return placedPatterns.value.filter(p => p.templateId === templateId).length
   }
@@ -108,6 +126,27 @@ export const usePatternStore = defineStore('pattern', () => {
       stroke: template.stroke || colors.stroke,
       strokeWidth: template.strokeWidth || colors.strokeWidth
     }
+    patternTemplates.value.push(newTemplate)
+    return newTemplate
+  }
+
+  function importSvgTemplate(name: string, svgContent: string, fill?: string, stroke?: string, strokeWidth?: number): PatternTemplate | null {
+    const points = parseSvgToPoints(svgContent)
+    if (points.length < 3) {
+      return null
+    }
+
+    const colors = getDefaultPatternColors()
+    const newTemplate: PatternTemplate = {
+      id: generateId(),
+      name: name || 'SVG导入纹样',
+      type: 'custom',
+      points,
+      fill: fill || colors.fill,
+      stroke: stroke || colors.stroke,
+      strokeWidth: strokeWidth != null ? strokeWidth : colors.strokeWidth
+    }
+
     patternTemplates.value.push(newTemplate)
     return newTemplate
   }
@@ -153,11 +192,101 @@ export const usePatternStore = defineStore('pattern', () => {
       scaleY: 1
     }
 
+    if (checkPatternOutOfBounds(template, placed, silverSheet.value)) {
+      return null
+    }
+
     placedPatterns.value.push(placed)
     return placed
   }
 
-  function updatePlacedPattern(id: string, updates: Partial<PlacedPattern>) {
+  function placePatternBatch(templateId: string, count: number): PlacedPattern[] {
+    const template = patternTemplates.value.find(t => t.id === templateId)
+    if (!template || count <= 0) return []
+
+    const result: PlacedPattern[] = []
+    const spacing = 10
+    const sheetW = silverSheet.value.width
+    const sheetH = silverSheet.value.height
+
+    let currentX = spacing
+    let currentY = spacing
+
+    for (let i = 0; i < count; i++) {
+      const testPlaced: PlacedPattern = {
+        id: generateId(),
+        templateId,
+        x: currentX,
+        y: currentY,
+        rotation: 0,
+        scaleX: 1,
+        scaleY: 1
+      }
+
+      if (checkPatternOutOfBounds(template, testPlaced, silverSheet.value)) {
+        break
+      }
+
+      let overlaps = false
+      for (const existing of [...placedPatterns.value, ...result]) {
+        const existingTemplate = patternTemplates.value.find(t => t.id === existing.templateId)
+        if (existingTemplate && checkPatternsOverlap(template, testPlaced, existingTemplate, existing)) {
+          overlaps = true
+          break
+        }
+      }
+
+      if (!overlaps) {
+        result.push(testPlaced)
+        currentX += spacing * 2
+        if (currentX > sheetW - spacing) {
+          currentX = spacing
+          currentY += spacing * 2
+        }
+      } else {
+        currentX += spacing
+        if (currentX > sheetW - spacing) {
+          currentX = spacing
+          currentY += spacing
+        }
+        if (currentY > sheetH - spacing) {
+          break
+        }
+        i--
+      }
+    }
+
+    placedPatterns.value.push(...result)
+    return result
+  }
+
+  function updatePlacedPattern(id: string, updates: Partial<PlacedPattern>): { valid: boolean; reason?: 'outOfBounds' | 'overlapping' } {
+    const index = placedPatterns.value.findIndex(p => p.id === id)
+    if (index === -1) return { valid: true }
+
+    const updated = { ...placedPatterns.value[index], ...updates }
+
+    const template = patternTemplates.value.find(t => t.id === updated.templateId)
+    if (!template) return { valid: true }
+
+    if (checkPatternOutOfBounds(template, updated, silverSheet.value)) {
+      return { valid: false, reason: 'outOfBounds' }
+    }
+
+    for (const other of placedPatterns.value) {
+      if (other.id === id) continue
+      const otherTemplate = patternTemplates.value.find(t => t.id === other.templateId)
+      if (!otherTemplate) continue
+      if (checkPatternsOverlap(template, updated, otherTemplate, other)) {
+        return { valid: false, reason: 'overlapping' }
+      }
+    }
+
+    placedPatterns.value[index] = updated
+    return { valid: true }
+  }
+
+  function forceUpdatePlacedPattern(id: string, updates: Partial<PlacedPattern>) {
     const index = placedPatterns.value.findIndex(p => p.id === id)
     if (index !== -1) {
       placedPatterns.value[index] = { ...placedPatterns.value[index], ...updates }
@@ -178,16 +307,42 @@ export const usePatternStore = defineStore('pattern', () => {
     const template = patternTemplates.value.find(t => t.id === original.templateId)
     if (!template) return null
 
-    const offset = 20 / canvasScale.value
-    const newPlaced: PlacedPattern = {
-      ...original,
-      id: generateId(),
-      x: original.x + offset,
-      y: original.y + offset
+    const offsets = [
+      { dx: 20, dy: 0 },
+      { dx: -20, dy: 0 },
+      { dx: 0, dy: 20 },
+      { dx: 0, dy: -20 },
+      { dx: 20, dy: 20 },
+      { dx: -20, dy: -20 },
+      { dx: 20, dy: -20 },
+      { dx: -20, dy: 20 }
+    ]
+
+    for (const offset of offsets) {
+      const newPlaced: PlacedPattern = {
+        ...original,
+        id: generateId(),
+        x: original.x + offset.dx,
+        y: original.y + offset.dy
+      }
+
+      if (!checkPatternOutOfBounds(template, newPlaced, silverSheet.value)) {
+        let overlaps = false
+        for (const other of placedPatterns.value) {
+          const otherTemplate = patternTemplates.value.find(t => t.id === other.templateId)
+          if (otherTemplate && checkPatternsOverlap(template, newPlaced, otherTemplate, other)) {
+            overlaps = true
+            break
+          }
+        }
+        if (!overlaps) {
+          placedPatterns.value.push(newPlaced)
+          return newPlaced
+        }
+      }
     }
 
-    placedPatterns.value.push(newPlaced)
-    return newPlaced
+    return null
   }
 
   function selectPattern(id: string | null) {
@@ -199,6 +354,24 @@ export const usePatternStore = defineStore('pattern', () => {
     if (pattern) {
       dragSnapshot.value = { ...pattern }
     }
+  }
+
+  function startPropertyEdit(id: string) {
+    const pattern = placedPatterns.value.find(p => p.id === id)
+    if (pattern) {
+      propertySnapshot.value = { ...pattern }
+    }
+  }
+
+  function revertPropertyEdit(id: string): boolean {
+    if (!propertySnapshot.value) return false
+    const index = placedPatterns.value.findIndex(p => p.id === id)
+    if (index !== -1) {
+      placedPatterns.value[index] = { ...propertySnapshot.value }
+      propertySnapshot.value = null
+      return true
+    }
+    return false
   }
 
   function isPlacedPatternValid(placed: PlacedPattern): boolean {
@@ -340,6 +513,59 @@ export const usePatternStore = defineStore('pattern', () => {
     canvasOffsetY.value = 0
   }
 
+  function getCanvasView(): CanvasViewState {
+    return {
+      scale: canvasScale.value,
+      offsetX: canvasOffsetX.value,
+      offsetY: canvasOffsetY.value
+    }
+  }
+
+  function setCanvasView(view: CanvasViewState) {
+    canvasScale.value = view.scale
+    canvasOffsetX.value = view.offsetX
+    canvasOffsetY.value = view.offsetY
+  }
+
+  function setAutoArrangeOptions(options: Partial<AutoArrangeOptions>) {
+    autoArrangeOptions.value = { ...autoArrangeOptions.value, ...options }
+  }
+
+  function runAutoArrange(): number {
+    isAutoArranging.value = true
+    const result = autoArrangePatterns(
+      patternTemplates.value,
+      placedPatterns.value,
+      silverSheet.value,
+      autoArrangeOptions.value
+    )
+
+    const idMap = new Map<string, string>()
+    for (let i = 0; i < placedPatterns.value.length; i++) {
+      if (result[i]) {
+        idMap.set(placedPatterns.value[i].id, result[i].id)
+      }
+    }
+
+    const originalIds = placedPatterns.value.map(p => p.id)
+    const validResults: PlacedPattern[] = []
+    for (let i = 0; i < result.length && i < originalIds.length; i++) {
+      validResults.push({
+        ...result[i],
+        id: originalIds[i]
+      })
+    }
+
+    placedPatterns.value = validResults
+
+    if (selectedPatternId.value && !placedPatterns.value.find(p => p.id === selectedPatternId.value)) {
+      selectedPatternId.value = null
+    }
+
+    isAutoArranging.value = false
+    return validResults.length
+  }
+
   function saveScheme(name: string) {
     const scheme: LayoutScheme = {
       id: generateId(),
@@ -347,7 +573,8 @@ export const usePatternStore = defineStore('pattern', () => {
       createdAt: Date.now(),
       silverSheet: { ...silverSheet.value },
       patterns: JSON.parse(JSON.stringify(patternTemplates.value)),
-      placedPatterns: JSON.parse(JSON.stringify(placedPatterns.value))
+      placedPatterns: JSON.parse(JSON.stringify(placedPatterns.value)),
+      canvasView: getCanvasView()
     }
     schemes.value.push(scheme)
     currentSchemeId.value = scheme.id
@@ -364,6 +591,11 @@ export const usePatternStore = defineStore('pattern', () => {
     placedPatterns.value = JSON.parse(JSON.stringify(scheme.placedPatterns))
     selectedPatternId.value = null
     currentSchemeId.value = scheme.id
+
+    if (scheme.canvasView) {
+      setCanvasView(scheme.canvasView)
+    }
+
     return true
   }
 
@@ -478,19 +710,27 @@ export const usePatternStore = defineStore('pattern', () => {
     outOfBoundsPatterns,
     overlappingPatternPairs,
     hasIssues,
+    autoArrangeOptions,
+    isAutoArranging,
+    schemeComparisonList,
     getPatternCount,
     setSilverSheet,
     addPatternTemplate,
+    importSvgTemplate,
     updatePatternTemplate,
     deletePatternTemplate,
     forceDeletePatternTemplate,
     placePattern,
+    placePatternBatch,
     updatePlacedPattern,
+    forceUpdatePlacedPattern,
     removePlacedPattern,
     duplicatePlacedPattern,
     selectPattern,
     startDrag,
     endDrag,
+    startPropertyEdit,
+    revertPropertyEdit,
     isPlacedPatternValid,
     isDrawingMode,
     drawingPoints,
@@ -503,6 +743,10 @@ export const usePatternStore = defineStore('pattern', () => {
     setCanvasScale,
     setCanvasOffset,
     resetCanvasView,
+    getCanvasView,
+    setCanvasView,
+    setAutoArrangeOptions,
+    runAutoArrange,
     saveScheme,
     loadScheme,
     deleteScheme,

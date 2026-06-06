@@ -33,6 +33,12 @@ export interface SilverSheet {
   height: number
 }
 
+export interface CanvasViewState {
+  scale: number
+  offsetX: number
+  offsetY: number
+}
+
 export interface LayoutScheme {
   id: string
   name: string
@@ -40,6 +46,7 @@ export interface LayoutScheme {
   silverSheet: SilverSheet
   patterns: PatternTemplate[]
   placedPatterns: PlacedPattern[]
+  canvasView?: CanvasViewState
 }
 
 export interface CanvasState {
@@ -47,4 +54,20 @@ export interface CanvasState {
   offsetX: number
   offsetY: number
   selectedPatternId: string | null
+}
+
+export type AutoArrangeAlgorithm = 'grid' | 'row' | 'compact'
+
+export interface AutoArrangeOptions {
+  algorithm: AutoArrangeAlgorithm
+  spacing: number
+  allowRotation: boolean
+}
+
+export interface SchemeComparisonItem {
+  schemeId: string
+  schemeName: string
+  utilization: number
+  patternCount: number
+  silverSheetSize: string
 }

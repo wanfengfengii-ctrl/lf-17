@@ -42,7 +42,7 @@ function handleResetView() {
         <NLayout style="height: 100vh;">
           <NLayoutHeader bordered class="app-header">
             <div class="header-content">
-              <NH2 class="app-title">传统银饰纹样拼版工具</NH2>
+              <NH2 class="app-title">智能银饰拼版系统</NH2>
               <NSpace>
                 <NButton size="small" ghost @click="handleResetView">
                   <template #icon>
