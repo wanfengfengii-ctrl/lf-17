@@ -8,6 +8,7 @@ import {
   NButton,
   NSpace,
   NIcon,
+  NPopconfirm,
   useMessage
 } from 'naive-ui'
 import { Duplicate, Trash, Reload } from '@vicons/ionicons5'
@@ -175,12 +176,21 @@ function handleRotationChange(value: number | null) {
         </template>
         复制
       </NButton>
-      <NButton size="small" type="error" ghost block @click="handleDelete">
-        <template #icon>
-          <NIcon><Trash /></NIcon>
+      <NPopconfirm
+        positive-text="删除"
+        negative-text="取消"
+        @positive-click="handleDelete"
+      >
+        <template #trigger>
+          <NButton size="small" type="error" ghost block>
+            <template #icon>
+              <NIcon><Trash /></NIcon>
+            </template>
+            删除
+          </NButton>
         </template>
-        删除
-      </NButton>
+        确定要删除这个纹样吗？
+      </NPopconfirm>
     </NSpace>
   </NCard>
 

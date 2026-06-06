@@ -1,16 +1,20 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { usePatternStore } from '@/stores/pattern'
+import { useMessage, useDialog } from 'naive-ui'
 import type { PlacedPattern, PatternTemplate } from '@/types/pattern'
 import { checkPatternOutOfBounds } from '@/utils/patternUtils'
 
 const store = usePatternStore()
+const message = useMessage()
+const dialog = useDialog()
 
 const containerRef = ref<HTMLElement | null>(null)
 const stageSize = ref({ width: 800, height: 600 })
 const isDraggingStage = ref(false)
 const dragStart = ref({ x: 0, y: 0 })
 const dragStartOffset = ref({ x: 0, y: 0 })
+const mousePos = ref({ x: 0, y: 0 })
 
 const stageConfig = computed(() => ({
   width: stageSize.value.width,
@@ -118,8 +122,33 @@ function getLineConfig(template: PatternTemplate, placed: PlacedPattern) {
   }
 }
 
+const drawingLinePoints = computed(() => {
+  if (store.drawingPoints.length === 0) return []
+  const points = store.drawingPoints.flatMap(p => [p.x, p.y])
+  if (store.drawingPoints.length > 0) {
+    points.push(store.drawingPoints[0].x, store.drawingPoints[0].y)
+  }
+  return points
+})
+
+const drawingLineConfig = computed(() => ({
+  points: drawingLinePoints.value,
+  stroke: '#e85a3a',
+  strokeWidth: 2 / store.canvasScale,
+  dash: [5 / store.canvasScale, 5 / store.canvasScale],
+  fill: 'rgba(205, 133, 63, 0.3)'
+}))
+
+function screenToStage(screenX: number, screenY: number): { x: number; y: number } {
+  return {
+    x: (screenX - store.canvasOffsetX) / store.canvasScale,
+    y: (screenY - store.canvasOffsetY) / store.canvasScale
+  }
+}
+
 function handlePatternDragStart(_e: any, placedId: string) {
   store.selectPattern(placedId)
+  store.startDrag(placedId)
 }
 
 function handlePatternDragMove(e: any, placedId: string) {
@@ -128,6 +157,17 @@ function handlePatternDragMove(e: any, placedId: string) {
     x: node.x(),
     y: node.y()
   })
+}
+
+function handlePatternDragEnd(_e: any, placedId: string) {
+  const result = store.endDrag(placedId)
+  if (!result.valid) {
+    if (result.reason === 'outOfBounds') {
+      message.warning('纹样不能超出银片边界，已自动回退')
+    } else if (result.reason === 'overlapping') {
+      message.warning('纹样之间不能重叠，已自动回退')
+    }
+  }
 }
 
 function handleStageMouseDown(e: any) {
@@ -201,6 +241,35 @@ function updateSize() {
 }
 
 function handleKeyDown(e: KeyboardEvent) {
+  if (store.isDrawingMode) {
+    switch (e.key) {
+      case 'Escape':
+        e.preventDefault()
+        store.cancelDrawing()
+        message.info('已取消绘制')
+        break
+      case 'Backspace':
+      case 'Delete':
+        e.preventDefault()
+        if (store.drawingPoints.length > 0) {
+          store.undoDrawingPoint()
+        }
+        break
+      case 'Enter':
+        e.preventDefault()
+        if (store.drawingPoints.length >= 3) {
+          const newTemplate = store.finishDrawing()
+          if (newTemplate) {
+            message.success('自定义纹样创建成功')
+          }
+        } else {
+          message.warning('至少需要3个顶点才能创建纹样')
+        }
+        break
+    }
+    return
+  }
+
   if (!store.selectedPatternId) return
 
   const step = e.shiftKey ? 10 : 1
@@ -225,7 +294,18 @@ function handleKeyDown(e: KeyboardEvent) {
     case 'Delete':
     case 'Backspace':
       e.preventDefault()
-      store.removePlacedPattern(store.selectedPatternId)
+      dialog.warning({
+        title: '确认删除',
+        content: '确定要删除选中的纹样吗？',
+        positiveText: '删除',
+        negativeText: '取消',
+        onPositiveClick: () => {
+          if (store.selectedPatternId) {
+            store.removePlacedPattern(store.selectedPatternId)
+            message.success('纹样已删除')
+          }
+        }
+      })
       break
     case 'd':
     case 'D':
@@ -264,14 +344,40 @@ function moveSelected(dx: number, dy: number) {
 }
 
 function handleClick(e: any) {
+  if (store.isDrawingMode) {
+    const stage = e.target.getStage()
+    const pointer = stage.getPointerPosition()
+    if (pointer) {
+      const pos = screenToStage(pointer.x, pointer.y)
+      if (pos.x >= 0 && pos.x <= store.silverSheet.width &&
+          pos.y >= 0 && pos.y <= store.silverSheet.height) {
+        store.addDrawingPoint(pos.x, pos.y)
+      } else {
+        message.warning('请在银片范围内绘制')
+      }
+    }
+    return
+  }
   if (e.target.attrs.name === 'sheetRect') {
     store.selectPattern(null)
   }
 }
 
 function handleStageClick(e: any) {
+  if (store.isDrawingMode) {
+    return
+  }
   if (e.target === e.target.getStage()) {
     store.selectPattern(null)
+  }
+}
+
+function handleStageDblClick(_e: any) {
+  if (store.isDrawingMode && store.drawingPoints.length >= 3) {
+    const newTemplate = store.finishDrawing()
+    if (newTemplate) {
+      message.success('自定义纹样创建成功')
+    }
   }
 }
 
@@ -317,6 +423,7 @@ watch(
       @mouseleave="handleStageMouseUp"
       @wheel="handleWheel"
       @click="handleStageClick"
+      @dblclick="handleStageDblClick"
     >
       <v-layer>
         <v-rect
@@ -332,6 +439,7 @@ watch(
               :config="getCircleConfig(getTemplate(placed.templateId)!, placed)"
               @dragstart="handlePatternDragStart($event, placed.id)"
               @dragmove="handlePatternDragMove($event, placed.id)"
+              @dragend="handlePatternDragEnd($event, placed.id)"
               @click="store.selectPattern(placed.id)"
             />
             <v-rect
@@ -339,6 +447,7 @@ watch(
               :config="getRectConfig(getTemplate(placed.templateId)!, placed)"
               @dragstart="handlePatternDragStart($event, placed.id)"
               @dragmove="handlePatternDragMove($event, placed.id)"
+              @dragend="handlePatternDragEnd($event, placed.id)"
               @click="store.selectPattern(placed.id)"
             />
             <v-line
@@ -346,12 +455,51 @@ watch(
               :config="getLineConfig(getTemplate(placed.templateId)!, placed)"
               @dragstart="handlePatternDragStart($event, placed.id)"
               @dragmove="handlePatternDragMove($event, placed.id)"
+              @dragend="handlePatternDragEnd($event, placed.id)"
               @click="store.selectPattern(placed.id)"
+            />
+          </template>
+        </template>
+
+        <template v-if="store.isDrawingMode">
+          <v-line
+            v-if="store.drawingPoints.length > 0"
+            :config="drawingLineConfig"
+          />
+          <template v-for="(point, index) in store.drawingPoints" :key="index">
+            <v-circle
+              :config="{
+                x: point.x,
+                y: point.y,
+                radius: 4 / store.canvasScale,
+                fill: '#fff',
+                stroke: '#e85a3a',
+                strokeWidth: 2 / store.canvasScale
+              }"
             />
           </template>
         </template>
       </v-layer>
     </v-stage>
+
+    <div v-if="store.isDrawingMode" class="drawing-bar">
+      <div class="drawing-info">
+        <span class="drawing-title">绘制自定义轮廓</span>
+        <span class="drawing-hint">点击添加顶点 · 双击/回车完成 · ESC取消 · 退格撤销</span>
+        <span class="drawing-count">已添加 {{ store.drawingPoints.length }} 个顶点</span>
+      </div>
+      <div class="drawing-actions">
+        <button class="drawing-btn" @click="store.undoDrawingPoint()" :disabled="store.drawingPoints.length === 0">
+          撤销
+        </button>
+        <button class="drawing-btn primary" @click="store.finishDrawing()" :disabled="store.drawingPoints.length < 3">
+          完成
+        </button>
+        <button class="drawing-btn danger" @click="store.cancelDrawing()">
+          取消
+        </button>
+      </div>
+    </div>
 
     <div class="canvas-controls">
       <div class="scale-info">
@@ -403,5 +551,87 @@ watch(
   font-size: 11px;
   color: #999;
   margin-top: 4px;
+}
+
+.drawing-bar {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.95);
+  padding: 10px 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  z-index: 100;
+  border: 2px solid #e85a3a;
+}
+
+.drawing-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.drawing-title {
+  font-weight: 600;
+  color: #e85a3a;
+  font-size: 14px;
+}
+
+.drawing-hint {
+  font-size: 11px;
+  color: #999;
+}
+
+.drawing-count {
+  font-size: 12px;
+  color: #666;
+}
+
+.drawing-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.drawing-btn {
+  padding: 6px 14px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.drawing-btn:hover:not(:disabled) {
+  background: #f5f5f0;
+  border-color: #cd853f;
+}
+
+.drawing-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.drawing-btn.primary {
+  background: #e85a3a;
+  color: #fff;
+  border-color: #e85a3a;
+}
+
+.drawing-btn.primary:hover:not(:disabled) {
+  background: #d04a2a;
+}
+
+.drawing-btn.danger {
+  color: #999;
+}
+
+.drawing-btn.danger:hover:not(:disabled) {
+  color: #e85a3a;
+  border-color: #e85a3a;
 }
 </style>

@@ -38,7 +38,7 @@ const strokeWidth = ref(2)
 const patternTypeOptions = [
   { label: '圆形', value: 'circle' },
   { label: '矩形', value: 'rectangle' },
-  { label: '自定义（八边形）', value: 'custom' }
+  { label: '自定义轮廓（手绘）', value: 'custom' }
 ]
 
 const formValid = computed(() => {
@@ -58,6 +58,19 @@ function handleConfirm() {
     return
   }
 
+  if (patternType.value === 'custom') {
+    store.startDrawing(
+      name.value.trim(),
+      fillColor.value,
+      strokeColor.value,
+      strokeWidth.value
+    )
+    resetForm()
+    emit('update:show', false)
+    message.info('请在画布上点击绘制轮廓，双击或按回车完成')
+    return
+  }
+
   let template: any = {
     name: name.value.trim(),
     type: patternType.value,
@@ -71,18 +84,6 @@ function handleConfirm() {
   } else if (patternType.value === 'rectangle') {
     template.width = width.value
     template.height = height.value
-  } else if (patternType.value === 'custom') {
-    const r = 20
-    template.points = [
-      { x: 0, y: -r },
-      { x: r * 0.7, y: -r * 0.7 },
-      { x: r, y: 0 },
-      { x: r * 0.7, y: r * 0.7 },
-      { x: 0, y: r },
-      { x: -r * 0.7, y: r * 0.7 },
-      { x: -r, y: 0 },
-      { x: -r * 0.7, y: -r * 0.7 }
-    ]
   }
 
   store.addPatternTemplate(template)
@@ -167,8 +168,11 @@ watch(() => props.show, (val) => {
       </template>
 
       <NFormItem v-if="patternType === 'custom'" label="说明">
-        <div style="font-size: 13px; color: #666;">
-          自定义纹样将创建一个八边形示例（半径20mm）
+        <div style="font-size: 13px; color: #666; line-height: 1.6;">
+          点击"开始绘制"后，在画布上依次点击添加顶点<br/>
+          · 单击添加顶点<br/>
+          · 双击或按回车完成绘制<br/>
+          · 按 ESC 取消，按退格撤销上一点
         </div>
       </NFormItem>
 
@@ -195,7 +199,7 @@ watch(() => props.show, (val) => {
       <NSpace justify="end">
         <NButton @click="handleCancel">取消</NButton>
         <NButton type="primary" :disabled="!formValid" @click="handleConfirm">
-          创建
+          {{ patternType === 'custom' ? '开始绘制' : '创建' }}
         </NButton>
       </NSpace>
     </template>

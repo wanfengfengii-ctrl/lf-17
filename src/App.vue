@@ -10,7 +10,8 @@ import {
   NSpace,
   NButton,
   NIcon,
-  NMessageProvider
+  NMessageProvider,
+  NDialogProvider
 } from 'naive-ui'
 import { RefreshOutline } from '@vicons/ionicons5'
 import { usePatternStore } from '@/stores/pattern'
@@ -37,56 +38,58 @@ function handleResetView() {
 <template>
   <NConfigProvider>
     <NMessageProvider>
-      <NLayout style="height: 100vh;">
-        <NLayoutHeader bordered class="app-header">
-          <div class="header-content">
-            <NH2 class="app-title">传统银饰纹样拼版工具</NH2>
-            <NSpace>
-              <NButton size="small" ghost @click="handleResetView">
-                <template #icon>
-                  <NIcon><RefreshOutline /></NIcon>
-                </template>
-                重置视图
-              </NButton>
-            </NSpace>
-          </div>
-        </NLayoutHeader>
-
-        <NLayout has-sider style="height: calc(100vh - 64px);">
-          <NLayoutSider
-            width="320"
-            bordered
-            show-trigger
-            collapse-mode="width"
-            :collapsed-width="0"
-            class="left-sider"
-          >
-            <div class="sider-content">
-              <PatternList />
-              <SchemeManager />
+      <NDialogProvider>
+        <NLayout style="height: 100vh;">
+          <NLayoutHeader bordered class="app-header">
+            <div class="header-content">
+              <NH2 class="app-title">传统银饰纹样拼版工具</NH2>
+              <NSpace>
+                <NButton size="small" ghost @click="handleResetView">
+                  <template #icon>
+                    <NIcon><RefreshOutline /></NIcon>
+                  </template>
+                  重置视图
+                </NButton>
+              </NSpace>
             </div>
-          </NLayoutSider>
+          </NLayoutHeader>
 
-          <NLayoutContent class="canvas-wrapper">
-            <PatternCanvas />
-          </NLayoutContent>
+          <NLayout has-sider style="height: calc(100vh - 64px);">
+            <NLayoutSider
+              width="320"
+              bordered
+              show-trigger
+              collapse-mode="width"
+              :collapsed-width="0"
+              class="left-sider"
+            >
+              <div class="sider-content">
+                <PatternList />
+                <SchemeManager />
+              </div>
+            </NLayoutSider>
 
-          <NLayoutSider
-            width="280"
-            bordered
-            show-trigger
-            collapse-mode="width"
-            :collapsed-width="0"
-            position="absolute"
-            class="right-sider"
-          >
-            <div class="sider-content">
-              <InfoPanel />
-              <PatternProperties />
-            </div>
-          </NLayoutSider>
+            <NLayoutContent class="canvas-wrapper">
+              <PatternCanvas />
+            </NLayoutContent>
+
+            <NLayoutSider
+              width="280"
+              bordered
+              show-trigger
+              collapse-mode="width"
+              :collapsed-width="0"
+              position="absolute"
+              class="right-sider"
+            >
+              <div class="sider-content">
+                <InfoPanel />
+                <PatternProperties />
+              </div>
+            </NLayoutSider>
+          </NLayout>
         </NLayout>
-      </NLayout>
+      </NDialogProvider>
     </NMessageProvider>
   </NConfigProvider>
 </template>

@@ -5,7 +5,8 @@ import type {
   PlacedPattern,
   SilverSheet,
   LayoutScheme,
-  PatternType
+  PatternType,
+  Point
 } from '@/types/pattern'
 import {
   generateId,
@@ -37,6 +38,15 @@ export const usePatternStore = defineStore('pattern', () => {
   const canvasScale = ref(2)
   const canvasOffsetX = ref(0)
   const canvasOffsetY = ref(0)
+
+  const dragSnapshot = ref<PlacedPattern | null>(null)
+
+  const isDrawingMode = ref(false)
+  const drawingPoints = ref<Point[]>([])
+  const drawingName = ref('')
+  const drawingFill = ref('#CD853F')
+  const drawingStroke = ref('#8B4513')
+  const drawingStrokeWidth = ref(2)
 
   const sheetArea = computed(() => silverSheet.value.width * silverSheet.value.height)
 
@@ -182,6 +192,137 @@ export const usePatternStore = defineStore('pattern', () => {
 
   function selectPattern(id: string | null) {
     selectedPatternId.value = id
+  }
+
+  function startDrag(id: string) {
+    const pattern = placedPatterns.value.find(p => p.id === id)
+    if (pattern) {
+      dragSnapshot.value = { ...pattern }
+    }
+  }
+
+  function isPlacedPatternValid(placed: PlacedPattern): boolean {
+    const template = patternTemplates.value.find(t => t.id === placed.templateId)
+    if (!template) return false
+
+    if (checkPatternOutOfBounds(template, placed, silverSheet.value)) {
+      return false
+    }
+
+    for (const other of placedPatterns.value) {
+      if (other.id === placed.id) continue
+      const otherTemplate = patternTemplates.value.find(t => t.id === other.templateId)
+      if (!otherTemplate) continue
+      if (checkPatternsOverlap(template, placed, otherTemplate, other)) {
+        return false
+      }
+    }
+
+    return true
+  }
+
+  function endDrag(id: string): { valid: boolean; reason?: 'outOfBounds' | 'overlapping' } {
+    const pattern = placedPatterns.value.find(p => p.id === id)
+    if (!pattern || !dragSnapshot.value) {
+      dragSnapshot.value = null
+      return { valid: true }
+    }
+
+    const template = patternTemplates.value.find(t => t.id === pattern.templateId)
+    if (!template) {
+      dragSnapshot.value = null
+      return { valid: true }
+    }
+
+    if (checkPatternOutOfBounds(template, pattern, silverSheet.value)) {
+      const idx = placedPatterns.value.findIndex(p => p.id === id)
+      if (idx !== -1 && dragSnapshot.value) {
+        placedPatterns.value[idx] = { ...dragSnapshot.value }
+      }
+      dragSnapshot.value = null
+      return { valid: false, reason: 'outOfBounds' }
+    }
+
+    for (const other of placedPatterns.value) {
+      if (other.id === id) continue
+      const otherTemplate = patternTemplates.value.find(t => t.id === other.templateId)
+      if (!otherTemplate) continue
+      if (checkPatternsOverlap(template, pattern, otherTemplate, other)) {
+        const idx = placedPatterns.value.findIndex(p => p.id === id)
+        if (idx !== -1 && dragSnapshot.value) {
+          placedPatterns.value[idx] = { ...dragSnapshot.value }
+        }
+        dragSnapshot.value = null
+        return { valid: false, reason: 'overlapping' }
+      }
+    }
+
+    dragSnapshot.value = null
+    return { valid: true }
+  }
+
+  function startDrawing(name: string, fill?: string, stroke?: string, strokeWidth?: number) {
+    isDrawingMode.value = true
+    drawingPoints.value = []
+    drawingName.value = name || '自定义纹样'
+    if (fill) drawingFill.value = fill
+    if (stroke) drawingStroke.value = stroke
+    if (strokeWidth !== undefined) drawingStrokeWidth.value = strokeWidth
+  }
+
+  function addDrawingPoint(x: number, y: number) {
+    if (!isDrawingMode.value) return
+    drawingPoints.value.push({ x, y })
+  }
+
+  function undoDrawingPoint() {
+    if (drawingPoints.value.length > 0) {
+      drawingPoints.value.pop()
+    }
+  }
+
+  function cancelDrawing() {
+    isDrawingMode.value = false
+    drawingPoints.value = []
+    drawingName.value = ''
+  }
+
+  function finishDrawing(): PatternTemplate | null {
+    if (drawingPoints.value.length < 3) {
+      cancelDrawing()
+      return null
+    }
+
+    const centroid = calculateCentroid(drawingPoints.value)
+    const centeredPoints = drawingPoints.value.map(p => ({
+      x: p.x - centroid.x,
+      y: p.y - centroid.y
+    }))
+
+    const newTemplate = addPatternTemplate({
+      name: drawingName.value,
+      type: 'custom' as PatternType,
+      points: centeredPoints,
+      fill: drawingFill.value,
+      stroke: drawingStroke.value,
+      strokeWidth: drawingStrokeWidth.value
+    })
+
+    cancelDrawing()
+    return newTemplate
+  }
+
+  function calculateCentroid(points: Point[]): Point {
+    let cx = 0
+    let cy = 0
+    for (const p of points) {
+      cx += p.x
+      cy += p.y
+    }
+    return {
+      x: cx / points.length,
+      y: cy / points.length
+    }
   }
 
   function setCanvasScale(scale: number) {
@@ -348,6 +489,17 @@ export const usePatternStore = defineStore('pattern', () => {
     removePlacedPattern,
     duplicatePlacedPattern,
     selectPattern,
+    startDrag,
+    endDrag,
+    isPlacedPatternValid,
+    isDrawingMode,
+    drawingPoints,
+    drawingName,
+    startDrawing,
+    addDrawingPoint,
+    undoDrawingPoint,
+    cancelDrawing,
+    finishDrawing,
     setCanvasScale,
     setCanvasOffset,
     resetCanvasView,
