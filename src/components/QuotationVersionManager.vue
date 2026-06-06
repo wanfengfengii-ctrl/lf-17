@@ -19,7 +19,8 @@ import {
   Trash,
   Eye,
   FileTray,
-  Create
+  Create,
+  List
 } from '@vicons/ionicons5'
 import { useQuotationStore } from '@/stores/quotation'
 import { formatCurrency, formatWeight } from '@/utils/quotationUtils'
@@ -31,7 +32,7 @@ const message = useMessage()
 const showRenameDialog = ref(false)
 const renameVersionId = ref('')
 const renameInput = ref('')
-const emit = defineEmits(['preview'])
+const emit = defineEmits(['preview', 'summary'])
 
 const sortedVersions = computed(() => {
   return [...quotationStore.quotationVersions].sort(
@@ -90,6 +91,30 @@ function handleCreateWorkOrder(versionId: string) {
     message.success(`工单已创建：${result.orderNo}`)
   }
 }
+
+function handleSummary(version: QuotationVersion) {
+  emit('summary', version.id)
+}
+
+function getApprovalTagType(status: string): 'default' | 'success' | 'warning' | 'error' | 'info' {
+  const map: Record<string, 'default' | 'success' | 'warning' | 'error' | 'info'> = {
+    pending: 'warning',
+    approved: 'success',
+    rejected: 'error',
+    needsRevision: 'info'
+  }
+  return map[status] || 'default'
+}
+
+function getApprovalTagText(status: string): string {
+  const map: Record<string, string> = {
+    pending: '待审批',
+    approved: '已通过',
+    rejected: '已拒绝',
+    needsRevision: '需修改'
+  }
+  return map[status] || '未提交'
+}
 </script>
 
 <template>
@@ -117,6 +142,13 @@ function handleCreateWorkOrder(versionId: string) {
               >
                 当前
               </NTag>
+              <NTag
+                v-if="version.approvalStatus"
+                size="small"
+                :type="getApprovalTagType(version.approvalStatus)"
+              >
+                {{ getApprovalTagText(version.approvalStatus) }}
+              </NTag>
             </div>
           </template>
           <template #description>
@@ -137,6 +169,11 @@ function handleCreateWorkOrder(versionId: string) {
               <NButton size="tiny" type="info" ghost @click.stop="handlePreview(version)">
                 <template #icon>
                   <NIcon><Eye /></NIcon>
+                </template>
+              </NButton>
+              <NButton size="tiny" type="info" ghost @click.stop="handleSummary(version)">
+                <template #icon>
+                  <NIcon><List /></NIcon>
                 </template>
               </NButton>
               <NButton size="tiny" type="primary" ghost @click.stop="openRenameDialog(version)">

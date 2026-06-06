@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import {
   NConfigProvider,
   NLayout,
@@ -15,7 +15,7 @@ import {
   useDialog,
   useMessage
 } from 'naive-ui'
-import { RefreshOutline, Pricetag } from '@vicons/ionicons5'
+import { RefreshOutline, Pricetag, List } from '@vicons/ionicons5'
 import { usePatternStore } from '@/stores/pattern'
 import { useQuotationStore } from '@/stores/quotation'
 import PatternList from '@/components/PatternList.vue'
@@ -28,6 +28,8 @@ import OrderInfoPanel from '@/components/OrderInfoPanel.vue'
 import QuotationVersionManager from '@/components/QuotationVersionManager.vue'
 import WorkOrderManager from '@/components/WorkOrderManager.vue'
 import WorkOrderPreview from '@/components/WorkOrderPreview.vue'
+import DeliveryWarningPanel from '@/components/DeliveryWarningPanel.vue'
+import OrderSummary from '@/components/OrderSummary.vue'
 import type { QuotationVersion, WorkOrderData } from '@/types/quotation'
 
 const store = usePatternStore()
@@ -40,6 +42,13 @@ const showWorkOrderPreview = ref(false)
 const previewQuotation = ref<QuotationVersion | null>(null)
 const previewWorkOrder = ref<WorkOrderData | null>(null)
 const rightPanelTab = ref<'info' | 'quotation'>('quotation')
+
+const showOrderSummary = ref(false)
+const summaryTargetType = ref<'scheme' | 'quotation' | 'workOrder'>('workOrder')
+const summaryTargetId = ref('')
+
+const overdueCount = computed(() => quotationStore.overdueWorkOrders.length)
+const warningCount = computed(() => quotationStore.warningWorkOrders.length)
 
 function canSwitchTab(): boolean {
   if (quotationStore.isOrderInfoEditing && quotationStore.hasUnsavedOrderChanges) {
@@ -70,6 +79,7 @@ onMounted(() => {
   store.loadSchemesFromStorage()
   quotationStore.loadQuotationVersionsFromStorage()
   quotationStore.loadWorkOrdersFromStorage()
+  quotationStore.loadOperationLogsFromStorage()
   if (store.patternTemplates.length === 0 && store.placedPatterns.length === 0) {
     store.createDefaultPatterns()
   }
@@ -90,6 +100,32 @@ function handleWorkOrderPreview(order: WorkOrderData) {
   previewQuotation.value = null
   showWorkOrderPreview.value = true
 }
+
+function handleViewOrderFromWarning(order: WorkOrderData) {
+  previewWorkOrder.value = order
+  previewQuotation.value = null
+  showWorkOrderPreview.value = true
+}
+
+function openOrderSummary(type: 'scheme' | 'quotation' | 'workOrder', id: string) {
+  summaryTargetType.value = type
+  summaryTargetId.value = id
+  showOrderSummary.value = true
+}
+
+function handleSummaryPreviewQuotation(version: QuotationVersion) {
+  previewQuotation.value = version
+  previewWorkOrder.value = null
+  showOrderSummary.value = false
+  showWorkOrderPreview.value = true
+}
+
+function handleSummaryPreviewWorkOrder(order: WorkOrderData) {
+  previewWorkOrder.value = order
+  previewQuotation.value = null
+  showOrderSummary.value = false
+  showWorkOrderPreview.value = true
+}
 </script>
 
 <template>
@@ -99,8 +135,17 @@ function handleWorkOrderPreview(order: WorkOrderData) {
         <NLayout style="height: 100vh;">
           <NLayoutHeader bordered class="app-header">
             <div class="header-content">
-              <NH2 class="app-title">智能银饰拼版系统</NH2>
+              <div class="header-left">
+                <NH2 class="app-title">订单协同与生产追踪系统</NH2>
+                <span class="subtitle">智能银饰拼版 · 全流程管理</span>
+              </div>
               <NSpace>
+                <NButton size="small" ghost @click="openOrderSummary('workOrder', '')">
+                  <template #icon>
+                    <NIcon><List /></NIcon>
+                  </template>
+                  订单汇总
+                </NButton>
                 <NButton size="small" ghost @click="handleResetView">
                   <template #icon>
                     <NIcon><RefreshOutline /></NIcon>
@@ -121,10 +166,14 @@ function handleWorkOrderPreview(order: WorkOrderData) {
               class="left-sider"
             >
               <div class="sider-content">
+                <DeliveryWarningPanel
+                  v-if="overdueCount > 0 || warningCount > 0"
+                  @view-order="handleViewOrderFromWarning"
+                />
                 <PatternList />
                 <SchemeManager />
-                <QuotationVersionManager @preview="handleQuotationPreview" />
-                <WorkOrderManager @preview="handleWorkOrderPreview" />
+                <QuotationVersionManager @preview="handleQuotationPreview" @summary="(id: string) => openOrderSummary('quotation', id)" />
+                <WorkOrderManager @preview="handleWorkOrderPreview" @summary="(id: string) => openOrderSummary('workOrder', id)" />
               </div>
             </NLayoutSider>
 
@@ -177,6 +226,15 @@ function handleWorkOrderPreview(order: WorkOrderData) {
             :work-order="previewWorkOrder"
             @update:show="showWorkOrderPreview = $event"
           />
+
+          <OrderSummary
+            :show="showOrderSummary"
+            :target-type="summaryTargetType"
+            :target-id="summaryTargetId"
+            @update:show="showOrderSummary = $event"
+            @preview-quotation="handleSummaryPreviewQuotation"
+            @preview-work-order="handleSummaryPreviewWorkOrder"
+          />
         </NLayout>
       </NDialogProvider>
     </NMessageProvider>
@@ -199,12 +257,24 @@ function handleWorkOrderPreview(order: WorkOrderData) {
   align-items: center;
 }
 
+.header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
 .app-title {
   margin: 0;
   color: #f5f5f0;
   font-size: 20px;
   font-weight: 600;
   letter-spacing: 2px;
+}
+
+.subtitle {
+  font-size: 12px;
+  color: rgba(245, 245, 240, 0.7);
+  letter-spacing: 1px;
 }
 
 .canvas-wrapper {

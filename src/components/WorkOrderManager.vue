@@ -20,7 +20,9 @@ import {
   Eye,
   Checkmark,
   Play,
-  CheckmarkDone
+  CheckmarkDone,
+  List,
+  Alert
 } from '@vicons/ionicons5'
 import { useQuotationStore } from '@/stores/quotation'
 import { formatCurrency } from '@/utils/quotationUtils'
@@ -30,7 +32,7 @@ import { WORK_ORDER_STATUS_LABELS } from '@/types/quotation'
 const quotationStore = useQuotationStore()
 const message = useMessage()
 
-const emit = defineEmits(['preview'])
+const emit = defineEmits(['preview', 'summary'])
 
 const statusFilter = ref<WorkOrderStatus | 'all'>('all')
 
@@ -93,6 +95,38 @@ function handleDelete(orderNo: string) {
   quotationStore.deleteWorkOrder(orderNo)
   message.success('工单已删除')
 }
+
+function handleSummary(order: any) {
+  emit('summary', order.id)
+}
+
+function getDeliveryWarningLevel(order: any): string {
+  return quotationStore.getDeliveryWarning(order.id) || 'normal'
+}
+
+function getWarningTagType(level: string): 'default' | 'success' | 'warning' | 'error' | 'info' {
+  const map: Record<string, 'default' | 'success' | 'warning' | 'error' | 'info'> = {
+    normal: 'success',
+    near: 'warning',
+    urgent: 'error',
+    overdue: 'error'
+  }
+  return map[level] || 'default'
+}
+
+function getWarningText(level: string): string {
+  const map: Record<string, string> = {
+    normal: '正常',
+    near: '临近交期',
+    urgent: '紧急',
+    overdue: '已逾期'
+  }
+  return map[level] || ''
+}
+
+function getProductionProgress(order: any): number {
+  return quotationStore.getProductionProgress(order.id)
+}
 </script>
 
 <template>
@@ -126,6 +160,14 @@ function handleDelete(orderNo: string) {
               <NTag size="small" :type="getStatusType(order.status)">
                 {{ WORK_ORDER_STATUS_LABELS[order.status] }}
               </NTag>
+              <NTag
+                v-if="order.deliveryDate && getDeliveryWarningLevel(order) !== 'normal'"
+                size="small"
+                :type="getWarningTagType(getDeliveryWarningLevel(order))"
+              >
+                <NIcon style="margin-right: 2px;"><Alert /></NIcon>
+                {{ getWarningText(getDeliveryWarningLevel(order)) }}
+              </NTag>
             </div>
           </template>
           <template #description>
@@ -133,6 +175,15 @@ function handleDelete(orderNo: string) {
               <span>{{ order.customerInfo.name || '未命名客户' }}</span>
               <span>{{ order.quantity }} 件</span>
               <span>{{ formatDate(order.createdAt) }}</span>
+            </div>
+            <div v-if="order.productionNodes && order.productionNodes.length > 0" class="progress-bar">
+              <div class="progress-bg">
+                <div 
+                  class="progress-fill" 
+                  :style="{ width: getProductionProgress(order) + '%' }"
+                ></div>
+              </div>
+              <span class="progress-text">{{ getProductionProgress(order) }}%</span>
             </div>
             <div class="order-price">
               <span class="price-label">报价</span>
@@ -147,7 +198,13 @@ function handleDelete(orderNo: string) {
                 <template #icon>
                   <NIcon><Eye /></NIcon>
                 </template>
-                预览
+                详情
+              </NButton>
+              <NButton size="tiny" type="info" ghost @click.stop="handleSummary(order)">
+                <template #icon>
+                  <NIcon><List /></NIcon>
+                </template>
+                汇总
               </NButton>
               <NSelect
                 :value="order.status"
@@ -233,5 +290,34 @@ function handleDelete(orderNo: string) {
   font-size: 14px;
   font-weight: 600;
   color: #d46b08;
+}
+
+.progress-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.progress-bg {
+  flex: 1;
+  height: 6px;
+  background: #f0f0f0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #52c41a 0%, #389e0d 100%);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 11px;
+  color: #666;
+  min-width: 32px;
+  text-align: right;
 }
 </style>

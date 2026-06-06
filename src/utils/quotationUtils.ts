@@ -11,8 +11,16 @@ import type {
   CustomerInfo,
   QuotationVersion,
   WorkOrderData,
-  WorkOrderStatus
+  WorkOrderStatus,
+  ProductionNode,
+  WorkOrderFlowRecord,
+  OperationLog,
+  DeliveryWarningLevel,
+  CustomerConfirmation,
+  ApprovalRecord,
+  ApprovalStatus
 } from '@/types/quotation'
+import { PRODUCTION_NODE_DEFS } from '@/types/quotation'
 import { calculateTotalUsedArea, generateId } from './patternUtils'
 
 export const DEFAULT_QUOTATION_CONFIG: QuotationConfig = {
@@ -200,7 +208,9 @@ export function createQuotationVersion(
   templates: PatternTemplate[],
   placedPatterns: PlacedPattern[],
   canvasView: any,
-  config: QuotationConfig
+  config: QuotationConfig,
+  schemeId?: string,
+  schemeName?: string
 ): QuotationVersion {
   const breakdown = calculateQuotationBreakdown(templates, placedPatterns, quantity, config)
   const now = Date.now()
@@ -221,7 +231,11 @@ export function createQuotationVersion(
       canvasView: canvasView ? { ...canvasView } : undefined
     },
     breakdown: JSON.parse(JSON.stringify(breakdown)),
-    config: JSON.parse(JSON.stringify(config))
+    config: JSON.parse(JSON.stringify(config)),
+    approvalStatus: 'pending',
+    approvalRecords: [],
+    schemeId,
+    schemeName
   }
 }
 
@@ -236,9 +250,18 @@ export function generateWorkOrderNo(): string {
 
 export function createWorkOrderFromQuotation(
   quotation: QuotationVersion,
-  status: WorkOrderStatus = 'draft'
+  status: WorkOrderStatus = 'draft',
+  operator: string = '系统'
 ): WorkOrderData {
-  return {
+  const flowRecord = createFlowRecord(
+    '',
+    null,
+    status,
+    operator,
+    '创建工单'
+  )
+  
+  const workOrder: WorkOrderData = {
     orderNo: generateWorkOrderNo(),
     createdAt: Date.now(),
     customerInfo: { ...quotation.customerInfo },
@@ -247,8 +270,19 @@ export function createWorkOrderFromQuotation(
     quantity: quotation.quantity,
     layoutSnapshot: JSON.parse(JSON.stringify(quotation.layoutSnapshot)),
     breakdown: JSON.parse(JSON.stringify(quotation.breakdown)),
-    status
+    status,
+    quotationId: quotation.id,
+    quotationVersionName: quotation.versionName,
+    productionNodes: createDefaultProductionNodes(),
+    flowRecords: [],
+    schemeId: quotation.schemeId,
+    schemeName: quotation.schemeName
   }
+  
+  flowRecord.orderNo = workOrder.orderNo
+  workOrder.flowRecords.push(flowRecord)
+  
+  return workOrder
 }
 
 export function formatCurrency(value: number): string {
@@ -296,4 +330,122 @@ export function calculateUtilization(
   if (sheetArea <= 0) return 0
   const usedArea = calculateTotalUsedArea(templates, placedPatterns)
   return (usedArea / sheetArea) * 100
+}
+
+export function createDefaultProductionNodes(): ProductionNode[] {
+  return PRODUCTION_NODE_DEFS.filter(d => d.default).map((def, index) => ({
+    id: generateId(),
+    type: def.type,
+    name: def.name,
+    status: 'pending',
+    sortOrder: index
+  }))
+}
+
+export function createFlowRecord(
+  orderNo: string,
+  fromStatus: WorkOrderStatus | null,
+  toStatus: WorkOrderStatus,
+  operator: string,
+  remark: string = ''
+): WorkOrderFlowRecord {
+  return {
+    id: generateId(),
+    orderNo,
+    fromStatus,
+    toStatus,
+    operator,
+    remark,
+    createdAt: Date.now()
+  }
+}
+
+export function createOperationLog(
+  targetType: 'quotation' | 'workOrder' | 'scheme',
+  targetId: string,
+  type: OperationLog['type'],
+  operator: string,
+  description: string,
+  detail?: string
+): OperationLog {
+  return {
+    id: generateId(),
+    targetType,
+    targetId,
+    type,
+    operator,
+    description,
+    detail,
+    createdAt: Date.now()
+  }
+}
+
+export function getDeliveryWarningLevel(deliveryDate: string, status: WorkOrderStatus): DeliveryWarningLevel {
+  if (!deliveryDate || status === 'completed') return 'normal'
+  
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const delivery = new Date(deliveryDate)
+  delivery.setHours(0, 0, 0, 0)
+  
+  const diffDays = Math.ceil((delivery.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+  
+  if (diffDays < 0) return 'overdue'
+  if (diffDays <= 1) return 'urgent'
+  if (diffDays <= 3) return 'warning'
+  return 'normal'
+}
+
+export function getDaysRemaining(deliveryDate: string): number {
+  if (!deliveryDate) return 0
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const delivery = new Date(deliveryDate)
+  delivery.setHours(0, 0, 0, 0)
+  return Math.ceil((delivery.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+}
+
+export function createCustomerConfirmation(
+  targetType: 'quotation' | 'workOrder',
+  targetId: string
+): CustomerConfirmation {
+  return {
+    id: generateId(),
+    targetType,
+    targetId,
+    status: 'pending',
+    sentAt: Date.now()
+  }
+}
+
+export function createApprovalRecord(
+  versionId: string,
+  status: ApprovalStatus,
+  approver: string,
+  comment: string = ''
+): ApprovalRecord {
+  return {
+    id: generateId(),
+    versionId,
+    status,
+    approver,
+    comment,
+    createdAt: Date.now()
+  }
+}
+
+export function calculateProductionProgress(nodes: ProductionNode[]): number {
+  if (nodes.length === 0) return 0
+  const completed = nodes.filter(n => n.status === 'completed').length
+  return Math.round((completed / nodes.length) * 100)
+}
+
+export function getWarningLevelColor(level: DeliveryWarningLevel): string {
+  switch (level) {
+    case 'normal': return 'success'
+    case 'warning': return 'warning'
+    case 'urgent': return 'error'
+    case 'overdue': return 'error'
+    default: return 'default'
+  }
 }
