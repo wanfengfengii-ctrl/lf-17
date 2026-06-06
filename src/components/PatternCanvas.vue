@@ -15,8 +15,11 @@ const stageSize = ref({ width: 800, height: 600 })
 const isDraggingStage = ref(false)
 const dragStart = ref({ x: 0, y: 0 })
 const dragStartOffset = ref({ x: 0, y: 0 })
+const patternDragStart = ref({ x: 0, y: 0, patternX: 0, patternY: 0 })
 
 const showArrangeOptions = ref(false)
+let lastClickTime = 0
+const DOUBLE_CLICK_DELAY = 300
 
 const stageConfig = computed(() => ({
   width: stageSize.value.width,
@@ -154,16 +157,45 @@ function screenToStage(screenX: number, screenY: number): { x: number; y: number
   }
 }
 
-function handlePatternDragStart(_e: any, placedId: string) {
+function handlePatternDragStart(e: any, placedId: string) {
   store.selectPattern(placedId)
   store.startDrag(placedId)
+  const pattern = store.placedPatterns.find(p => p.id === placedId)
+  const template = getTemplate(pattern?.templateId || '')
+  if (pattern && template) {
+    const node = e.target
+    let nodeCenterX = node.x()
+    let nodeCenterY = node.y()
+    if (template.type === 'rectangle') {
+      nodeCenterX = node.x() + node.width() / 2
+      nodeCenterY = node.y() + node.height() / 2
+    }
+    patternDragStart.value = {
+      x: nodeCenterX,
+      y: nodeCenterY,
+      patternX: pattern.x,
+      patternY: pattern.y
+    }
+  }
 }
 
 function handlePatternDragMove(e: any, placedId: string) {
+  const template = store.patternTemplates.find(t => {
+    const p = store.placedPatterns.find(pp => pp.id === placedId)
+    return p ? t.id === p.templateId : false
+  })
   const node = e.target
+  let nodeCenterX = node.x()
+  let nodeCenterY = node.y()
+  if (template?.type === 'rectangle') {
+    nodeCenterX = node.x() + node.width() / 2
+    nodeCenterY = node.y() + node.height() / 2
+  }
+  const dx = nodeCenterX - patternDragStart.value.x
+  const dy = nodeCenterY - patternDragStart.value.y
   store.forceUpdatePlacedPattern(placedId, {
-    x: node.x(),
-    y: node.y()
+    x: patternDragStart.value.patternX + dx,
+    y: patternDragStart.value.patternY + dy
   })
 }
 
@@ -266,9 +298,12 @@ function handleKeyDown(e: KeyboardEvent) {
       case 'Enter':
         e.preventDefault()
         if (store.drawingPoints.length >= 3) {
-          const newTemplate = store.finishDrawing()
-          if (newTemplate) {
-            message.success('自定义纹样创建成功')
+          const result = store.finishDrawing()
+          if (result) {
+            message.success('自定义纹样创建成功，已放入画布')
+            if (result.placed) {
+              store.selectPattern(result.placed.id)
+            }
           }
         } else {
           message.warning('至少需要3个顶点才能创建纹样')
@@ -371,6 +406,14 @@ function moveSelected(dx: number, dy: number) {
 
 function handleClick(e: any) {
   if (store.isDrawingMode) {
+    const now = Date.now()
+    const isDoubleClick = now - lastClickTime < DOUBLE_CLICK_DELAY
+    lastClickTime = now
+
+    if (isDoubleClick) {
+      return
+    }
+
     const stage = e.target.getStage()
     const pointer = stage.getPointerPosition()
     if (pointer) {
@@ -400,9 +443,12 @@ function handleStageClick(e: any) {
 
 function handleStageDblClick(_e: any) {
   if (store.isDrawingMode && store.drawingPoints.length >= 3) {
-    const newTemplate = store.finishDrawing()
-    if (newTemplate) {
-      message.success('自定义纹样创建成功')
+    const result = store.finishDrawing()
+    if (result) {
+      message.success('自定义纹样创建成功，已放入画布')
+      if (result.placed) {
+        store.selectPattern(result.placed.id)
+      }
     }
   }
 }

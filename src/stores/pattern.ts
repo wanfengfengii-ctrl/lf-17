@@ -460,7 +460,7 @@ export const usePatternStore = defineStore('pattern', () => {
     drawingName.value = ''
   }
 
-  function finishDrawing(): PatternTemplate | null {
+  function finishDrawing(): { template: PatternTemplate; placed: PlacedPattern | null } | null {
     if (drawingPoints.value.length < 3) {
       cancelDrawing()
       return null
@@ -481,8 +481,10 @@ export const usePatternStore = defineStore('pattern', () => {
       strokeWidth: drawingStrokeWidth.value
     })
 
+    const placedPattern = placePattern(newTemplate.id, centroid.x, centroid.y)
+
     cancelDrawing()
-    return newTemplate
+    return { template: newTemplate, placed: placedPattern }
   }
 
   function calculateCentroid(points: Point[]): Point {
