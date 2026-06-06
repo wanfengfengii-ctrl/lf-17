@@ -7,74 +7,149 @@ import {
   NInput,
   NDatePicker,
   NButton,
-  NIcon
+  NIcon,
+  NTag,
+  useMessage
 } from 'naive-ui'
 import {
   People,
   DocumentText,
   Calendar,
-  Create
+  Create,
+  Close,
+  Checkmark
 } from '@vicons/ionicons5'
 import { useQuotationStore } from '@/stores/quotation'
+import type { CustomerInfo } from '@/types/quotation'
 
 const quotationStore = useQuotationStore()
+const message = useMessage()
 
-const isEditing = ref(false)
+const isEditing = computed(() => quotationStore.isOrderInfoEditing)
+const hasUnsavedChanges = computed(() => quotationStore.hasUnsavedOrderChanges)
 
-function toggleEdit() {
-  isEditing.value = !isEditing.value
+const draftCustomerInfo = ref<CustomerInfo>({ ...quotationStore.customerInfo })
+const draftCraftNotes = ref(quotationStore.craftNotes)
+const draftDeliveryDate = ref(quotationStore.deliveryDate)
+
+const deliveryDateTs = computed(() => {
+  if (!draftDeliveryDate.value) return null
+  return new Date(draftDeliveryDate.value).getTime()
+})
+
+function enterEditMode() {
+  draftCustomerInfo.value = { ...quotationStore.customerInfo }
+  draftCraftNotes.value = quotationStore.craftNotes
+  draftDeliveryDate.value = quotationStore.deliveryDate
+  quotationStore.setUnsavedOrderChanges(false)
+  quotationStore.setOrderInfoEditing(true)
+}
+
+function exitEditMode(force: boolean = false) {
+  if (!force && quotationStore.hasUnsavedOrderChanges) {
+    return
+  }
+  quotationStore.setOrderInfoEditing(false)
+  quotationStore.setUnsavedOrderChanges(false)
+}
+
+function handleCancelEdit() {
+  exitEditMode(true)
+  message.info('已取消编辑')
+}
+
+function handleSaveEdit() {
+  quotationStore.setCustomerInfo(draftCustomerInfo.value)
+  quotationStore.setCraftNotes(draftCraftNotes.value)
+  quotationStore.setDeliveryDate(draftDeliveryDate.value)
+  quotationStore.setUnsavedOrderChanges(false)
+  quotationStore.setOrderInfoEditing(false)
+  message.success('订单信息已保存')
+}
+
+function markUnsaved() {
+  quotationStore.setUnsavedOrderChanges(true)
 }
 
 function handleCustomerNameChange(value: string) {
-  quotationStore.setCustomerInfo({ name: value })
+  draftCustomerInfo.value.name = value
+  markUnsaved()
 }
 
 function handleCustomerPhoneChange(value: string) {
-  quotationStore.setCustomerInfo({ phone: value })
+  draftCustomerInfo.value.phone = value
+  markUnsaved()
 }
 
 function handleCustomerCompanyChange(value: string) {
-  quotationStore.setCustomerInfo({ company: value })
+  draftCustomerInfo.value.company = value
+  markUnsaved()
 }
 
 function handleCustomerEmailChange(value: string) {
-  quotationStore.setCustomerInfo({ email: value })
+  draftCustomerInfo.value.email = value
+  markUnsaved()
 }
 
 function handleCustomerAddressChange(value: string) {
-  quotationStore.setCustomerInfo({ address: value })
+  draftCustomerInfo.value.address = value
+  markUnsaved()
 }
 
 function handleCraftNotesChange(e: Event) {
   const target = e.target as HTMLTextAreaElement
-  quotationStore.setCraftNotes(target.value)
+  draftCraftNotes.value = target.value
+  markUnsaved()
 }
 
 function handleDeliveryDateChange(value: number | null) {
   if (value) {
     const date = new Date(value)
     const dateStr = date.toISOString().split('T')[0]
-    quotationStore.setDeliveryDate(dateStr)
+    draftDeliveryDate.value = dateStr
   } else {
-    quotationStore.setDeliveryDate('')
+    draftDeliveryDate.value = ''
   }
+  markUnsaved()
 }
 
-const deliveryDateTs = computed(() => {
-  if (!quotationStore.deliveryDate) return null
-  return new Date(quotationStore.deliveryDate).getTime()
+defineExpose({
+  isEditing,
+  hasUnsavedChanges,
+  exitEditMode
 })
 </script>
 
 <template>
   <NCard title="订单信息" size="small" :bordered="false" class="order-info-card">
     <template #header-extra>
-      <NButton size="tiny" type="primary" ghost @click="toggleEdit">
-        <template #icon>
-          <NIcon><Create /></NIcon>
-        </template>
-        {{ isEditing ? '完成' : '编辑' }}
-      </NButton>
+      <template v-if="!isEditing">
+        <NButton size="tiny" type="primary" ghost @click="enterEditMode">
+          <template #icon>
+            <NIcon><Create /></NIcon>
+          </template>
+          编辑
+        </NButton>
+      </template>
+      <template v-else>
+        <div class="edit-actions">
+          <NTag v-if="hasUnsavedChanges" size="small" type="warning" class="unsaved-tag">
+            未保存
+          </NTag>
+          <NButton size="tiny" @click="handleCancelEdit">
+            <template #icon>
+              <NIcon><Close /></NIcon>
+            </template>
+            取消
+          </NButton>
+          <NButton size="tiny" type="primary" @click="handleSaveEdit">
+            <template #icon>
+              <NIcon><Checkmark /></NIcon>
+            </template>
+            保存
+          </NButton>
+        </div>
+      </template>
     </template>
 
     <div class="info-section">
@@ -120,35 +195,35 @@ const deliveryDateTs = computed(() => {
         <NForm label-placement="left" label-width="70px" size="small">
           <NFormItem label="姓名">
             <NInput
-              :value="quotationStore.customerInfo.name"
+              :value="draftCustomerInfo.name"
               placeholder="请输入客户姓名"
               @update:value="handleCustomerNameChange"
             />
           </NFormItem>
           <NFormItem label="电话">
             <NInput
-              :value="quotationStore.customerInfo.phone"
+              :value="draftCustomerInfo.phone"
               placeholder="请输入联系电话"
               @update:value="handleCustomerPhoneChange"
             />
           </NFormItem>
           <NFormItem label="公司">
             <NInput
-              :value="quotationStore.customerInfo.company"
+              :value="draftCustomerInfo.company"
               placeholder="请输入公司名称"
               @update:value="handleCustomerCompanyChange"
             />
           </NFormItem>
           <NFormItem label="邮箱">
             <NInput
-              :value="quotationStore.customerInfo.email"
+              :value="draftCustomerInfo.email"
               placeholder="请输入电子邮箱"
               @update:value="handleCustomerEmailChange"
             />
           </NFormItem>
           <NFormItem label="地址">
             <NInput
-              :value="quotationStore.customerInfo.address"
+              :value="draftCustomerInfo.address"
               placeholder="请输入联系地址"
               @update:value="handleCustomerAddressChange"
             />
@@ -208,7 +283,7 @@ const deliveryDateTs = computed(() => {
       <div v-else class="info-form">
         <textarea
           class="notes-textarea"
-          :value="quotationStore.craftNotes"
+          :value="draftCraftNotes"
           placeholder="请输入工艺备注，如特殊要求、材质说明、表面处理等..."
           rows="4"
           @input="handleCraftNotesChange"
@@ -221,6 +296,16 @@ const deliveryDateTs = computed(() => {
 <style scoped>
 .order-info-card {
   margin-bottom: 12px;
+}
+
+.edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.unsaved-tag {
+  margin-right: 4px;
 }
 
 .info-section {

@@ -35,18 +35,38 @@ export const useQuotationStore = defineStore('quotation', () => {
     defaultProcesses: DEFAULT_QUOTATION_CONFIG.defaultProcesses.map(p => ({ ...p }))
   })
 
+  const customProcesses = ref<CraftProcess[] | null>(null)
+
   const quotationVersions = ref<QuotationVersion[]>([])
   const currentVersionId = ref<string | null>(null)
 
   const workOrders = ref<WorkOrderData[]>([])
 
+  const isOrderInfoEditing = ref(false)
+  const hasUnsavedOrderChanges = ref(false)
+
   const currentBreakdown = computed<QuotationBreakdown>(() => {
-    return calculateQuotationBreakdown(
+    const baseBreakdown = calculateQuotationBreakdown(
       patternStore.patternTemplates,
       patternStore.placedPatterns,
       quantity.value,
       quotationConfig.value
     )
+
+    if (customProcesses.value) {
+      const updatedProcesses = customProcesses.value.map(p => ({
+        ...p,
+        totalPrice: Math.round(p.unitPrice * p.quantity * 100) / 100
+      }))
+      return recalculateBreakdownWithProcesses(
+        baseBreakdown,
+        updatedProcesses,
+        quantity.value,
+        quotationConfig.value
+      )
+    }
+
+    return baseBreakdown
   })
 
   const currentVersion = computed(() => {
@@ -76,46 +96,42 @@ export const useQuotationStore = defineStore('quotation', () => {
     quotationConfig.value = { ...quotationConfig.value, ...config }
   }
 
+  function ensureCustomProcesses() {
+    if (!customProcesses.value) {
+      customProcesses.value = currentBreakdown.value.processes.map(p => ({ ...p }))
+    }
+    return customProcesses.value!
+  }
+
   function updateProcess(processId: string, updates: Partial<CraftProcess>) {
-    const processes = [...currentBreakdown.value.processes]
+    const processes = ensureCustomProcesses()
     const index = processes.findIndex(p => p.id === processId)
     if (index !== -1) {
       processes[index] = { ...processes[index], ...updates }
       processes[index].totalPrice = Math.round(
         processes[index].unitPrice * processes[index].quantity * 100
       ) / 100
+      customProcesses.value = [...processes]
     }
-    return recalculateBreakdownWithProcesses(
-      currentBreakdown.value,
-      processes,
-      quantity.value,
-      quotationConfig.value
-    )
   }
 
   function addProcess(process: Omit<CraftProcess, 'id' | 'totalPrice'>) {
+    const processes = ensureCustomProcesses()
     const newProcess: CraftProcess = {
       ...process,
       id: Date.now().toString(36) + Math.random().toString(36).substr(2, 9),
       totalPrice: Math.round(process.unitPrice * process.quantity * 100) / 100
     }
-    const processes = [...currentBreakdown.value.processes, newProcess]
-    return recalculateBreakdownWithProcesses(
-      currentBreakdown.value,
-      processes,
-      quantity.value,
-      quotationConfig.value
-    )
+    customProcesses.value = [...processes, newProcess]
   }
 
   function removeProcess(processId: string) {
-    const processes = currentBreakdown.value.processes.filter(p => p.id !== processId)
-    return recalculateBreakdownWithProcesses(
-      currentBreakdown.value,
-      processes,
-      quantity.value,
-      quotationConfig.value
-    )
+    const processes = ensureCustomProcesses()
+    customProcesses.value = processes.filter(p => p.id !== processId)
+  }
+
+  function resetCustomProcesses() {
+    customProcesses.value = null
   }
 
   function saveQuotationVersion(versionName: string): QuotationVersion | null {
@@ -151,6 +167,12 @@ export const useQuotationStore = defineStore('quotation', () => {
     deliveryDate.value = version.deliveryDate
     quantity.value = version.quantity
     quotationConfig.value = JSON.parse(JSON.stringify(version.config))
+
+    if (version.breakdown.processes && version.breakdown.processes.length > 0) {
+      customProcesses.value = JSON.parse(JSON.stringify(version.breakdown.processes))
+    } else {
+      customProcesses.value = null
+    }
 
     patternStore.silverSheet.width = version.layoutSnapshot.silverSheet.width
     patternStore.silverSheet.height = version.layoutSnapshot.silverSheet.height
@@ -251,12 +273,26 @@ export const useQuotationStore = defineStore('quotation', () => {
     }
   }
 
+  function setOrderInfoEditing(editing: boolean) {
+    isOrderInfoEditing.value = editing
+    if (!editing) {
+      hasUnsavedOrderChanges.value = false
+    }
+  }
+
+  function setUnsavedOrderChanges(hasChanges: boolean) {
+    hasUnsavedOrderChanges.value = hasChanges
+  }
+
   function resetForm() {
     customerInfo.value = { ...DEFAULT_CUSTOMER_INFO }
     craftNotes.value = ''
     deliveryDate.value = ''
     quantity.value = 1
+    customProcesses.value = null
     currentVersionId.value = null
+    isOrderInfoEditing.value = false
+    hasUnsavedOrderChanges.value = false
   }
 
   return {
@@ -265,11 +301,14 @@ export const useQuotationStore = defineStore('quotation', () => {
     deliveryDate,
     quantity,
     quotationConfig,
+    customProcesses,
     quotationVersions,
     currentVersionId,
     currentVersion,
     currentBreakdown,
     workOrders,
+    isOrderInfoEditing,
+    hasUnsavedOrderChanges,
     setCustomerInfo,
     setCraftNotes,
     setDeliveryDate,
@@ -278,6 +317,9 @@ export const useQuotationStore = defineStore('quotation', () => {
     updateProcess,
     addProcess,
     removeProcess,
+    resetCustomProcesses,
+    setOrderInfoEditing,
+    setUnsavedOrderChanges,
     saveQuotationVersion,
     loadQuotationVersion,
     deleteQuotationVersion,

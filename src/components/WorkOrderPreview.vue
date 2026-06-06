@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import {
   NModal,
   NButton,
@@ -15,8 +15,10 @@ import type { DataTableColumns } from 'naive-ui'
 import {
   Print,
   Download,
-  Close
+  Close,
+  Image
 } from '@vicons/ionicons5'
+import html2canvas from 'html2canvas'
 import type { QuotationVersion, WorkOrderData } from '@/types/quotation'
 import { formatCurrency, formatWeight, getPatternQuantityMap } from '@/utils/quotationUtils'
 import { WORK_ORDER_STATUS_LABELS } from '@/types/quotation'
@@ -32,6 +34,9 @@ const emit = defineEmits<{
 }>()
 
 const message = useMessage()
+
+const previewContentRef = ref<HTMLElement | null>(null)
+const isExportingImage = ref(false)
 
 const modalTitle = computed(() => {
   if (props.workOrder) {
@@ -126,7 +131,43 @@ function formatDate(timestamp: number): string {
   })
 }
 
-function handleExport() {
+async function handleExportImage() {
+  if (!displayData.value || !previewContentRef.value) return
+
+  isExportingImage.value = true
+  const loadingMsg = message.loading('正在生成图片...', { duration: 0 })
+
+  try {
+    const canvas = await html2canvas(previewContentRef.value, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: false
+    })
+
+    const dataUrl = canvas.toDataURL('image/png')
+    const link = document.createElement('a')
+    link.href = dataUrl
+    const timestamp = formatDate(displayData.value.createdAt).replace(/[/: ]/g, '')
+    link.download = props.workOrder
+      ? `工单_${displayData.value.orderNo}.png`
+      : `报价单_${timestamp}.png`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+
+    loadingMsg.destroy()
+    message.success('图片已导出')
+  } catch (e) {
+    console.error('导出图片失败:', e)
+    loadingMsg.destroy()
+    message.error('导出图片失败，请重试')
+  } finally {
+    isExportingImage.value = false
+  }
+}
+
+function handleExportTxt() {
   if (!displayData.value) return
 
   const data = displayData.value
@@ -533,7 +574,7 @@ function handlePrint() {
     @update:show="handleClose"
     class="work-order-preview-modal"
   >
-    <div v-if="displayData" class="preview-content">
+    <div v-if="displayData" class="preview-content" ref="previewContentRef">
       <div class="preview-header">
         <div class="header-left">
           <h2 class="preview-title">银饰工艺报价工单</h2>
@@ -656,7 +697,13 @@ function handlePrint() {
           </NButton>
         </NSpace>
         <NSpace>
-          <NButton @click="handleExport">
+          <NButton :loading="isExportingImage" @click="handleExportImage">
+            <template #icon>
+              <NIcon><Image /></NIcon>
+            </template>
+            导出图片
+          </NButton>
+          <NButton @click="handleExportTxt">
             <template #icon>
               <NIcon><Download /></NIcon>
             </template>

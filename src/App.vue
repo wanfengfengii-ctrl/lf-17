@@ -11,7 +11,9 @@ import {
   NButton,
   NIcon,
   NMessageProvider,
-  NDialogProvider
+  NDialogProvider,
+  useDialog,
+  useMessage
 } from 'naive-ui'
 import { RefreshOutline, Pricetag } from '@vicons/ionicons5'
 import { usePatternStore } from '@/stores/pattern'
@@ -31,10 +33,38 @@ import type { QuotationVersion, WorkOrderData } from '@/types/quotation'
 const store = usePatternStore()
 const quotationStore = useQuotationStore()
 
+const dialog = useDialog()
+const message = useMessage()
+
 const showWorkOrderPreview = ref(false)
 const previewQuotation = ref<QuotationVersion | null>(null)
 const previewWorkOrder = ref<WorkOrderData | null>(null)
 const rightPanelTab = ref<'info' | 'quotation'>('quotation')
+
+function canSwitchTab(): boolean {
+  if (quotationStore.isOrderInfoEditing && quotationStore.hasUnsavedOrderChanges) {
+    dialog.warning({
+      title: '未保存的修改',
+      content: '您有未保存的订单信息，确定要离开吗？未保存的修改将会丢失。',
+      positiveText: '确定离开',
+      negativeText: '继续编辑',
+      onPositiveClick: () => {
+        quotationStore.setOrderInfoEditing(false)
+        quotationStore.setUnsavedOrderChanges(false)
+        message.info('已放弃未保存的修改')
+      }
+    })
+    return false
+  }
+  return true
+}
+
+function handleTabSwitch(tab: 'info' | 'quotation') {
+  if (tab === rightPanelTab.value) return
+  if (canSwitchTab()) {
+    rightPanelTab.value = tab
+  }
+}
 
 onMounted(() => {
   store.loadSchemesFromStorage()
@@ -115,14 +145,14 @@ function handleWorkOrderPreview(order: WorkOrderData) {
                 <button
                   class="right-tab"
                   :class="{ active: rightPanelTab === 'info' }"
-                  @click="rightPanelTab = 'info'"
+                  @click="handleTabSwitch('info')"
                 >
                   材料信息
                 </button>
                 <button
                   class="right-tab"
                   :class="{ active: rightPanelTab === 'quotation' }"
-                  @click="rightPanelTab = 'quotation'"
+                  @click="handleTabSwitch('quotation')"
                 >
                   <NIcon><Pricetag /></NIcon>
                   工艺报价
