@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import {
   NConfigProvider,
   NLayout,
@@ -13,18 +13,33 @@ import {
   NMessageProvider,
   NDialogProvider
 } from 'naive-ui'
-import { RefreshOutline } from '@vicons/ionicons5'
+import { RefreshOutline, Pricetag } from '@vicons/ionicons5'
 import { usePatternStore } from '@/stores/pattern'
+import { useQuotationStore } from '@/stores/quotation'
 import PatternList from '@/components/PatternList.vue'
 import InfoPanel from '@/components/InfoPanel.vue'
 import SchemeManager from '@/components/SchemeManager.vue'
 import PatternProperties from '@/components/PatternProperties.vue'
 import PatternCanvas from '@/components/PatternCanvas.vue'
+import QuotationPanel from '@/components/QuotationPanel.vue'
+import OrderInfoPanel from '@/components/OrderInfoPanel.vue'
+import QuotationVersionManager from '@/components/QuotationVersionManager.vue'
+import WorkOrderManager from '@/components/WorkOrderManager.vue'
+import WorkOrderPreview from '@/components/WorkOrderPreview.vue'
+import type { QuotationVersion, WorkOrderData } from '@/types/quotation'
 
 const store = usePatternStore()
+const quotationStore = useQuotationStore()
+
+const showWorkOrderPreview = ref(false)
+const previewQuotation = ref<QuotationVersion | null>(null)
+const previewWorkOrder = ref<WorkOrderData | null>(null)
+const rightPanelTab = ref<'info' | 'quotation'>('quotation')
 
 onMounted(() => {
   store.loadSchemesFromStorage()
+  quotationStore.loadQuotationVersionsFromStorage()
+  quotationStore.loadWorkOrdersFromStorage()
   if (store.patternTemplates.length === 0 && store.placedPatterns.length === 0) {
     store.createDefaultPatterns()
   }
@@ -32,6 +47,18 @@ onMounted(() => {
 
 function handleResetView() {
   store.resetCanvasView()
+}
+
+function handleQuotationPreview(version: QuotationVersion) {
+  previewQuotation.value = version
+  previewWorkOrder.value = null
+  showWorkOrderPreview.value = true
+}
+
+function handleWorkOrderPreview(order: WorkOrderData) {
+  previewWorkOrder.value = order
+  previewQuotation.value = null
+  showWorkOrderPreview.value = true
 }
 </script>
 
@@ -66,6 +93,8 @@ function handleResetView() {
               <div class="sider-content">
                 <PatternList />
                 <SchemeManager />
+                <QuotationVersionManager @preview="handleQuotationPreview" />
+                <WorkOrderManager @preview="handleWorkOrderPreview" />
               </div>
             </NLayoutSider>
 
@@ -74,7 +103,7 @@ function handleResetView() {
             </NLayoutContent>
 
             <NLayoutSider
-              width="280"
+              width="320"
               bordered
               show-trigger
               collapse-mode="width"
@@ -82,12 +111,42 @@ function handleResetView() {
               position="absolute"
               class="right-sider"
             >
-              <div class="sider-content">
-                <InfoPanel />
-                <PatternProperties />
+              <div class="right-tabs">
+                <button
+                  class="right-tab"
+                  :class="{ active: rightPanelTab === 'info' }"
+                  @click="rightPanelTab = 'info'"
+                >
+                  材料信息
+                </button>
+                <button
+                  class="right-tab"
+                  :class="{ active: rightPanelTab === 'quotation' }"
+                  @click="rightPanelTab = 'quotation'"
+                >
+                  <NIcon><Pricetag /></NIcon>
+                  工艺报价
+                </button>
+              </div>
+              <div class="sider-content right-sider-content">
+                <template v-if="rightPanelTab === 'info'">
+                  <InfoPanel />
+                  <PatternProperties />
+                </template>
+                <template v-else>
+                  <OrderInfoPanel />
+                  <QuotationPanel />
+                </template>
               </div>
             </NLayoutSider>
           </NLayout>
+
+          <WorkOrderPreview
+            :show="showWorkOrderPreview"
+            :quotation="previewQuotation"
+            :work-order="previewWorkOrder"
+            @update:show="showWorkOrderPreview = $event"
+          />
         </NLayout>
       </NDialogProvider>
     </NMessageProvider>
@@ -132,6 +191,43 @@ function handleResetView() {
   padding: 12px;
   height: 100%;
   overflow-y: auto;
+}
+
+.right-tabs {
+  display: flex;
+  border-bottom: 1px solid #e8e8e8;
+  background: #fafaf8;
+}
+
+.right-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s;
+  border-bottom: 2px solid transparent;
+}
+
+.right-tab:hover {
+  color: #cd853f;
+}
+
+.right-tab.active {
+  color: #8B4513;
+  font-weight: 600;
+  border-bottom-color: #8B4513;
+  background: #fff;
+}
+
+.right-sider-content {
+  height: calc(100% - 44px);
 }
 
 :deep(.n-layout-sider .n-layout-sider-children) {
